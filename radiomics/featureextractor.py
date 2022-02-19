@@ -2,18 +2,23 @@
 from __future__ import print_function
 
 import collections
-from itertools import chain
+import glob
 import json
 import logging
 import os
 import pathlib
+from itertools import chain
 
-import pykwalify.core
 import SimpleITK as sitk
+import numpy as np
+from cv2 import cv2
+import pydicom
+import pykwalify.core
 import six
 
-from radiomics import generalinfo, getFeatureClasses, getImageTypes, getParameterValidationFiles, imageoperations
-
+import generalinfo
+from getParameters import getFeatureClasses, getParameterValidationFiles, getImageTypes
+import imageoperations
 
 logger = logging.getLogger(__name__)
 geometryTolerance = None
@@ -200,7 +205,7 @@ class RadiomicsFeatureExtractor:
 
     logger.debug("Settings: %s", settings)
 
-  def execute(self, imageFilepath, maskFilepath, label=None, label_channel=None, voxelBased=False):
+  def execute(self, imageFilepath, maskFilepath, label=None, label_channel=None, voxelBased=False, isDicom=False):
     """
     Compute radiomics signature for provide image and mask combination. It comprises of the following steps:
 
@@ -226,6 +231,7 @@ class RadiomicsFeatureExtractor:
         pixel type. Default index is 0.
     :param voxelBased: Boolean, default False. If set to true, a voxel-based extraction is performed, segment-based
         otherwise.
+    :param isDicom:
     :returns: dictionary containing calculated signature ("<imageType>_<featureClass>_<featureName>":value).
         In case of segment-based extraction, value type for features is float, if voxel-based, type is SimpleITK.Image.
         Type of diagnostic features differs, but can always be represented as a string.
@@ -269,7 +275,7 @@ class RadiomicsFeatureExtractor:
 
     # 1. Load the image and mask
     featureVector = collections.OrderedDict()
-    image, mask = self.loadImage(imageFilepath, maskFilepath, generalInfo, **_settings)
+    image, mask = self.loadImage(imageFilepath, maskFilepath, generalInfo, isDicom, **_settings)
 
     # 2. Check whether loaded mask contains a valid ROI for feature extraction and get bounding box
     # Raises a ValueError if the ROI is invalid
@@ -334,7 +340,7 @@ class RadiomicsFeatureExtractor:
     return featureVector
 
   @staticmethod
-  def loadImage(ImageFilePath, MaskFilePath, generalInfo=None, **kwargs):
+  def loadImage(ImageFilePath, MaskFilePath, generalInfo=None, isDicom=False, **kwargs):
     """
     Load and pre-process the image and labelmap.
     If ImageFilePath is a string, it is loaded as SimpleITK Image and assigned to ``image``,
@@ -355,6 +361,7 @@ class RadiomicsFeatureExtractor:
                          to use.
     :param generalInfo: GeneralInfo Object. If provided, it is used to store diagnostic information of the
                         pre-processing.
+    :param isDicom:
     :param kwargs: Dictionary containing the settings to use for this particular image type.
     :return: 2 SimpleITK.Image objects representing the loaded image and mask, respectively.
     """
@@ -367,14 +374,28 @@ class RadiomicsFeatureExtractor:
     label = kwargs.get('label', 1)
 
     logger.info('Loading image and mask')
-    if isinstance(ImageFilePath, six.string_types) and os.path.isfile(ImageFilePath):
+    if isinstance(ImageFilePath, six.string_types) and isDicom and os.path.isdir(ImageFilePath):
+      files = glob.glob(os.path.join(ImageFilePath, '*.dcm'))
+      ims = []
+      for path in files:
+        ims.append(pydicom.dcmread(path).pixel_array)
+      vol = np.array(ims)
+      image = sitk.GetImageFromArray(vol)
+    elif isinstance(ImageFilePath, six.string_types) and os.path.isfile(ImageFilePath):
       image = sitk.ReadImage(ImageFilePath)
     elif isinstance(ImageFilePath, sitk.SimpleITK.Image):
       image = ImageFilePath
     else:
       raise ValueError('Error reading image Filepath or SimpleITK object')
 
-    if isinstance(MaskFilePath, six.string_types) and os.path.isfile(MaskFilePath):
+    if isinstance(MaskFilePath, six.string_types) and isDicom and os.path.isdir(MaskFilePath):
+      files = glob.glob(os.path.join(ImageFilePath, '*.png')) + glob.glob(os.path.join(ImageFilePath, '*.jpg'))
+      ims = []
+      for path in files:
+        ims.append(cv2.imread(path, flags=0))
+      vol = np.array(ims)
+      mask = sitk.GetImageFromArray(vol)
+    elif isinstance(MaskFilePath, six.string_types) and os.path.isfile(MaskFilePath):
       mask = sitk.ReadImage(MaskFilePath)
     elif isinstance(MaskFilePath, sitk.SimpleITK.Image):
       mask = MaskFilePath
