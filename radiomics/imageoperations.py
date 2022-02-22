@@ -328,7 +328,7 @@ def _checkROI(imageNode, maskNode, **kwargs):
   if label not in lssif.GetLabels():
     raise ValueError('Label (%d) not present in mask', label)
 
-  # LBound and size of the bounding box, as (L_X, L_Y, [L_Z], S_X, S_Y, [S_Z])
+  # Lower Bound and size of the bounding box, as (L_X, L_Y, [L_Z], S_X, S_Y, [S_Z])
   bb = numpy.array(lssif.GetBoundingBox(label))
   Nd = maskNode.GetDimension()
 
